@@ -1,5 +1,5 @@
 import random
-from cellular_automaton import *
+# from cellular_automaton import *
 import itertools
 import numpy as np
 from scipy import ndimage
@@ -13,7 +13,6 @@ import matplotlib.pyplot as plt
 import imageio
 
 
-from utils_cellular_automata import *
 from scipy.stats import bernoulli
 from scipy import stats
 from scipy import signal 
@@ -137,7 +136,7 @@ def make_gif(path):
     for filename in files_for_gif:
         filename = f'{path}{filename}'
         images.append(imageio.imread(filename))
-#         os.remove(filename)
+        os.remove(filename)
     return images
 
 def count_neighbors_and_get_means(grid, threshold = 0.5):
@@ -384,9 +383,9 @@ def update_grid_cells_active(grid_cells_active_, grid_prev_, grid_patch_):
     grid_cells_active_dilated = ndimage.binary_dilation(grid_cells_active_)
     grid_change = np.abs(grid_prev_ - grid_patch_) > 0
     grid_change_dilated = ndimage.binary_dilation(grid_change)
-    grid_cells_active = (grid_change_dilated & grid_cells_active_dilated) + grid_cells_active_
+    grid_cells_active = ((grid_change_dilated & grid_cells_active_dilated) + grid_cells_active_) >0
 #     grid_cells_active_border = np.abs(grid_cells_active - grid_cells_active_dilated) >0
-    return grid_cells_active#, grid_cells_active_border
+    return grid_cells_active, grid_change_dilated#, grid_cells_active_border
 
 def count_neighbors_and_get_means2(grid, threshold = 0.5):
     '''Count and return the:
@@ -701,3 +700,157 @@ def plot_inpain_orig_seed_generated(path_, mini_last, mini_orig, mini_patched_cl
     if path_ != 'no':
         plt.savefig(path_)
         plt.close()
+
+def plot_22(mini_last, mini_orig, mini_patched_clean, grid_filtered, central_slice=-1, plot_size=8, vmin=0, vmax=1):
+    if central_slice != -1:
+        mini_last = mini_last[central_slice]
+        mini_orig = mini_orig[central_slice]
+        mini_patched_clean = mini_patched_clean[central_slice]
+        grid_filtered = grid_filtered[central_slice]
+    fig, ax = plt.subplots(2,2, figsize=(plot_size,plot_size))
+    ax[0,0].imshow(mini_last, vmin=vmin, vmax=vmax)
+    ax[0,1].imshow(mini_orig, vmin=vmin, vmax=vmax)
+    ax[1,0].imshow(mini_patched_clean, vmin=vmin, vmax=vmax)
+    ax[1,1].imshow(grid_filtered, vmin=vmin, vmax=vmax)
+    for axx in ax.ravel(): axx.axis('off')
+    plt.tight_layout()
+
+# 3D ====================
+
+def count_neighbors_and_get_means_3D_mask(grid, mask, threshold = 0.5):
+    '''Get the sum and and mean of the cells around a cell WITHOUT MULTIPROCESSING'''
+    grid_sums = np.zeros_like(grid)
+    grid_means = np.zeros_like(grid)
+    grid_means2 = np.zeros_like(grid)
+    
+    z,y,x = np.where(mask==1)
+    
+    for i in range(1,np.shape(grid)[0]-1):
+        if i in z:
+            for j in range(1,np.shape(grid)[1]-1):
+                if j in y:
+                    for k in range(1,np.shape(grid)[2]-1):
+                        if k in x:
+                            #print(i,j)
+                            # count alive neighbors
+                            s = 0
+                            s += np.sum([grid[i-1,j-1, k-1] > threshold, grid[i,j-1, k-1] > threshold, grid[i+1,j-1, k-1] > threshold])
+                            s += np.sum([grid[i-1,j, k-1] > threshold, grid[i,j, k-1] > threshold, grid[i+1,j, k-1] > threshold])
+                            s += np.sum([grid[i-1,j+1, k-1] > threshold, grid[i,j+1, k-1] > threshold, grid[i+1,j+1, k-1] > threshold])
+
+                            s += np.sum([grid[i-1,j-1, k] > threshold, grid[i,j-1, k] > threshold, grid[i+1,j-1, k] > threshold])
+                            s += np.sum([grid[i-1,j, k] > threshold, grid[i+1,j, k] > threshold])
+                            s += np.sum([grid[i-1,j+1, k] > threshold, grid[i,j+1, k] > threshold, grid[i+1,j+1, k] > threshold])
+
+                            s += np.sum([grid[i-1,j-1, k+1] > threshold, grid[i,j-1, k+1] > threshold, grid[i+1,j-1, k+1] > threshold])
+                            s += np.sum([grid[i-1,j, k+1] > threshold, grid[i,j, k+1] > threshold, grid[i+1,j, k+1] > threshold])
+                            s += np.sum([grid[i-1,j+1, k+1] > threshold, grid[i,j+1, k+1] > threshold, grid[i+1,j+1, k+1] > threshold])
+
+                            grid_sums[i,j,k] = s
+                            # get mean neighbors
+                            m = 0
+                            m += np.sum([grid[i-1,j-1, k-1], grid[i,j-1, k-1], grid[i+1,j-1, k-1]])
+                            m += np.sum([grid[i-1,j, k-1], grid[i,j, k-1], grid[i+1,j, k-1]])
+                            m += np.sum([grid[i-1,j+1, k-1], grid[i,j+1, k-1], grid[i+1,j+1, k-1]])
+
+                            m += np.sum([grid[i-1,j-1, k], grid[i,j-1, k], grid[i+1,j-1, k]])
+                            m += np.sum([grid[i-1,j, k], grid[i+1,j, k]])
+                            m += np.sum([grid[i-1,j+1, k], grid[i,j+1, k], grid[i+1,j+1, k]])
+
+                            m += np.sum([grid[i-1,j-1, k+1], grid[i,j-1, k+1], grid[i+1,j-1, k+1]])
+                            m += np.sum([grid[i-1,j, k+1], grid[i,j, k+1], grid[i+1,j, k+1]])
+                            m += np.sum([grid[i-1,j+1, k+1], grid[i,j+1, k+1], grid[i+1,j+1, k+1]])
+                            grid_means[i,j,k] = m / 8
+                            # get mean neighbors and their neighbors
+                            # 
+    return grid_sums, grid_means
+
+def add_seed_3D(last, zz = 31, yy = 31, xx = 31, speckles_radious = 2, speckles_amount = 8):
+    mini_patched = copy(last)
+    grid_cells_active = np.zeros_like(mini_patched)
+    rand_y_coords = np.random.randint(-speckles_radious, speckles_radious, speckles_amount)
+    rand_x_coords = np.random.randint(-speckles_radious, speckles_radious, speckles_amount)
+    rand_z_coords = np.random.randint(-speckles_radious, speckles_radious, speckles_amount)
+    for rand_y, rand_x, rand_z in zip(rand_y_coords, rand_x_coords, rand_z_coords):
+        rand_int = random.uniform(0.1, 0.45)
+        mini_patched[zz + rand_z, yy + rand_y, xx + rand_x] += rand_int
+        grid_cells_active[zz + rand_z, yy + rand_y, xx + rand_x] = 1
+        
+    return mini_patched, grid_cells_active
+
+def survive_and_birth_individual_list_3D_mask(neighbors, means, mask, values, survives, births, cells_active):
+    neighbors = np.asarray(neighbors)
+    means = np.asarray(means)
+    values = np.asarray(values)
+    survives = np.asarray(survives)
+    births = np.asarray(births)
+    LIMIT_UP = 0.75
+    LIMIT_DOWN = 0.15
+    
+    
+    z,y,x = np.where(mask==1)
+    
+    grid_new = copy(values)
+    for i in range(1,np.shape(neighbors)[0]-1):
+        if i in z:
+            for j in range(1,np.shape(neighbors)[1]-1):
+                if j in y:
+                    for k in range(1,np.shape(neighbors)[2]-1):
+                        if k in x:
+
+                            # SURVIVE
+                            if LIMIT_DOWN < grid_new[i,j,k] < LIMIT_UP and cells_active[i,j,k] > 0: 
+                                np.random.rand()
+                                grid_new[i,j,k] = np.squeeze([np.mean((means[i,j,k], values[i,j,k]+.05)) if neighbors[i,j,k] in survives else values[i,j,k]-.1])
+                                #grid_new[i,j,k] = np.squeeze([values[i,j,k]+.1 if neighbors[i,j,k] in survives[i,j,k] else values[i,j,k]-.1])
+                            # BIRTH
+                            elif grid_new[i,j,k] < LIMIT_DOWN and cells_active[i,j,k] > 0:
+                                rand_close_to_alive = 0.35
+                                last_cell_state = grid_new[i,j,k]
+                                if neighbors[i,j,k] in births:
+                                    grid_new[i,j,k] = np.mean((rand_close_to_alive, means[i,j,k], last_cell_state))
+                            # LIMIT
+                            elif grid_new[i,j,k] > LIMIT_UP:
+                                rand_close_to_alive = np.mean((values[i,j,k]-.5, means[i,j,k]))
+                                grid_new[i,j,k] = rand_close_to_alive
+                            else: pass
+    
+    return grid_new
+
+def filter_nodule_generated3_3D(grid1, grid_cells_active_):
+    '''Use grid_cells_active to find the pixels where a nodule is generated. 
+    Filter the area where a nodule is generated
+    Downsample and then upsample to remove the pixelated effect
+    Normalize the down/upsampeld area to its original intensity range 
+    then place the filtered image back (remove the filtered borders [too dark]). 
+    Finally add the lung borders using mini_mask_not_lungs.
+    v3_1: 
+    - instead of copying the filtered rectangle [y_min:y_max,x_min:x_max] we only copy the values[y,x]
+    - corrected  the limits of the area that will be filtered, now we include x/y_max+1 to include the last pxl'''
+    z,y,x = np.where(grid_cells_active_==1)
+    y_max = np.max(y); y_min = np.min(y)
+    x_max = np.max(x); x_min = np.min(x)
+    z_max = np.max(z); z_min = np.min(z)
+    grid_filter = grid1[z_min:z_max+1,y_min:y_max+1,x_min:x_max+1]
+    grid_filter = signal.wiener(grid_filter)
+    #Adding downsampling -> upsampling and normalize to the original intensity range
+    shape1, shape2, shape3 =  np.shape(grid_filter)
+    original_min = np.min(grid_filter)
+    original_range = np.max(grid_filter) - original_min
+    
+    grid_filter_downsampled = block_reduce(grid_filter,(2,2,2))
+    shape_down1, shape_down2, shape_down3 =  np.shape(grid_filter_downsampled)
+    grid_filter = ndimage.zoom(grid_filter_downsampled,(shape1/shape_down1, shape2/shape_down2, shape3/shape_down3))
+    value_min = np.min(grid_filter)
+    value_max = np.max(grid_filter)
+    grid_filter = (grid_filter - value_min) / (value_max - value_min)
+    grid_filter = grid_filter * original_range + original_min
+    
+    #
+    grid_filter_added = copy(grid1)
+    #grid_filter_added[y_min:y_max,x_min:x_max] = grid_filter
+    y2 = y-y_min
+    x2 = x-x_min
+    z2 = z-z_min
+    grid_filter_added[z,y,x] = grid_filter[z2,y2,x2]
+    return grid_filter_added
