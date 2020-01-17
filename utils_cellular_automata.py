@@ -11,7 +11,7 @@ from skimage.measure import block_reduce
 from tqdm import tqdm_notebook
 import matplotlib.pyplot as plt
 import imageio
-
+from numba import jit
 
 from scipy.stats import bernoulli
 from scipy import stats
@@ -777,8 +777,8 @@ def add_seed_3D(last, zz = 31, yy = 31, xx = 31, speckles_radious = 2, speckles_
         grid_cells_active[zz + rand_z, yy + rand_y, xx + rand_x] = 1
         
     return mini_patched, grid_cells_active
-
-def survive_and_birth_individual_list_3D_mask(neighbors, means, mask, values, survives, births, cells_active):
+@jit
+def survive_and_birth_individual_list_3D_mask(neighbors, means, mask, values, survives, births, cells_active, grid_new):
     neighbors = np.asarray(neighbors)
     means = np.asarray(means)
     values = np.asarray(values)
@@ -786,11 +786,11 @@ def survive_and_birth_individual_list_3D_mask(neighbors, means, mask, values, su
     births = np.asarray(births)
     LIMIT_UP = 0.75
     LIMIT_DOWN = 0.15
-    
+    grid_new = np.asarray(grid_new)
     
     z,y,x = np.where(mask==1)
     
-    grid_new = copy(values)
+    # grid_new = copy(values)
     for i in range(1,np.shape(neighbors)[0]-1):
         if i in z:
             for j in range(1,np.shape(neighbors)[1]-1):
@@ -800,18 +800,16 @@ def survive_and_birth_individual_list_3D_mask(neighbors, means, mask, values, su
 
                             # SURVIVE
                             if LIMIT_DOWN < grid_new[i,j,k] < LIMIT_UP and cells_active[i,j,k] > 0: 
-                                np.random.rand()
-                                grid_new[i,j,k] = np.squeeze([np.mean((means[i,j,k], values[i,j,k]+.05)) if neighbors[i,j,k] in survives else values[i,j,k]-.1])
-                                #grid_new[i,j,k] = np.squeeze([values[i,j,k]+.1 if neighbors[i,j,k] in survives[i,j,k] else values[i,j,k]-.1])
+                                grid_new[i,j,k] = [(means[i,j,k] + values[i,j,k]+.05)/3 if neighbors[i,j,k] in survives else values[i,j,k]-.05][0]
                             # BIRTH
                             elif grid_new[i,j,k] < LIMIT_DOWN and cells_active[i,j,k] > 0:
-                                rand_close_to_alive = 0.35
+                                rand_close_to_alive = 0.2
                                 last_cell_state = grid_new[i,j,k]
                                 if neighbors[i,j,k] in births:
-                                    grid_new[i,j,k] = np.mean((rand_close_to_alive, means[i,j,k], last_cell_state))
+                                    grid_new[i,j,k] = (rand_close_to_alive + means[i,j,k] + last_cell_state)/3
                             # LIMIT
                             elif grid_new[i,j,k] > LIMIT_UP:
-                                rand_close_to_alive = np.mean((values[i,j,k]-.5, means[i,j,k]))
+                                rand_close_to_alive = (values[i,j,k]-.5 + means[i,j,k])/2
                                 grid_new[i,j,k] = rand_close_to_alive
                             else: pass
     

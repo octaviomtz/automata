@@ -2,3 +2,6 @@
 gifs*
 *.ipynb
 __pycache__
+Deep-Reinforcement-Learning-2.0/*
+reinforcement/*
+*.npz
