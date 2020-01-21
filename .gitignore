@@ -5,3 +5,7 @@ __pycache__
 Deep-Reinforcement-Learning-2.0/*
 reinforcement/*
 *.npz
+dqn_agent.py
+*.pth
+figures/*
+model.py

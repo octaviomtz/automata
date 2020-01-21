@@ -45,7 +45,7 @@ def action_plus_random(action, min_rand_action_val=0, max_rand_action_val=10, ra
     return action
 
 # Train across episodes
-n_episodes = 50
+n_episodes = 500
 timesteps = 60
 n_actions = 27
 agent = Agent(state_size=(32,32,32), action_size=n_actions+n_actions, seed=0)
@@ -53,10 +53,11 @@ preds, neighs, actives, rewards, ndl_targets = [], [], [], [], []
 
 score = 0
 
-for i_episode in tqdm_notebook(range(1, n_episodes+1),total = n_episodes+1, leave=True):
-    nodule_idx = np.random.randint(0,100)
-    state = nodules_smaller[nodule_idx]
+for i_episode in tqdm_notebook(range(1, n_episodes+1),total = n_episodes+1):
+    nodule_idx = np.random.randint(0,len(nodules_smaller) - (timesteps+1)) 
+    state = nodules_smaller[nodule_idx] # get random nodule
     grid_active = binary_dilation(state[0]>0)
+    actives.append(grid_active)
     preds.append(state)
     done = 0
 
@@ -71,11 +72,12 @@ for i_episode in tqdm_notebook(range(1, n_episodes+1),total = n_episodes+1, leav
 
         # env.step
         grid_new = copy(state[0])
-        grid_neigh, grid_means = count_neighbors_and_get_means_3D_mask(state[0], grid_active, threshold=.05)
+        grid_neigh, grid_means = count_neighbors_and_get_means_3D_mask(state[0], grid_active, threshold=.5)
         next_state = survive_and_birth_individual_list_3D_mask(grid_neigh, grid_means, grid_active, state[0], survive, birth, grid_active, grid_new)
         nodule_idx += 1
         nodule_target = nodules_smaller[nodule_idx]
-        reward = -np.sum(np.abs(nodule_target - next_state))
+        reward_not_normalized = -np.sum(np.abs(nodule_target - next_state)) # THIS SHOULD HAVE A NEGATIVE SIGN
+        reward = reward_not_normalized/(np.sum(nodule_target>0)) #normalize by the mask of the target
 
         # agent.step
         next_state = np.expand_dims(next_state,0); next_state = np.expand_dims(next_state,0)
@@ -92,7 +94,10 @@ for i_episode in tqdm_notebook(range(1, n_episodes+1),total = n_episodes+1, leav
         rewards.append(reward)
         ndl_targets.append(nodule_target)
         
-        if reward < -500: done=1
+        if i_episode%10 == 0:
+            torch.save(agent.qnetwork_local.state_dict(), 'DQN_CA_v0.pth')
+        
+        if np.abs(reward_not_normalized) > 500: done=1
             
         if done:
             break 

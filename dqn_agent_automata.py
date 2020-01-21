@@ -89,10 +89,16 @@ class Agent():
         # print('learning')
         #print(np.shape(states), np.shape(actions), np.shape(rewards), np.shape(next_states))
         # Get max predicted Q values (for next states) from target model
-        Q_targets_next = self.qnetwork_target(next_states).detach().max(1)[0].unsqueeze(1)
+        Q_targets_TEMP = self.qnetwork_target(next_states).detach()
+        # print(Q_targets_TEMP.shape)
+        # Instead of taking the max we take the average value
+        # Q_targets_next = self.qnetwork_target(next_states).detach().max(1)[0].unsqueeze(1)
+        Q_targets_next = self.qnetwork_target(next_states).detach()#.cpu().numpy()
+        Q_targets_next = Q_targets_next.sum(1)/Q_targets_next.shape[1]
+        Q_targets_next = torch.unsqueeze(Q_targets_next,-1)
         # Compute Q targets for current states 
         Q_targets = rewards + (gamma * Q_targets_next * (1 - dones))
-
+        ###print(f'Q_targets = {Q_targets[0].squeeze()}')
         # Get expected Q values from local model
         Q_expected = self.qnetwork_local(states).gather(1, actions)
 
@@ -159,3 +165,26 @@ class ReplayBuffer:
     def __len__(self):
         """Return the current size of internal memory."""
         return len(self.memory)
+
+def action_plus_random(action, min_rand_action_val=0, max_rand_action_val=10, rand_values = 4, birth_no_0=False):
+    ''' Convert to integers and add randomness
+    WARNING1: This function considers that the values given in action are in order. They come from the last 
+    layer of the NN and might not be in order. 
+    1.Get survive/birth from the full action array. 
+    2.Add randomness. WARNING (check if this is correct) 
+    Note1. Prevent nodules growing from nothing: Birth min_rand_action_val should be 1 and birth_no_0 = True
+    WARNING2. Removing of birth=0 activation might not be happening because of WARNING1'''
+    action = np.where(np.asarray(action)==1)[0]
+    # Randomness
+    rand_action = np.random.randint(min_rand_action_val, max_rand_action_val, rand_values)
+    action = np.random.permutation(action)
+    # If the rand_values are more than the values in action, then insert zeros that will be replaced by rand_values
+    if rand_values > len(action):
+        vals_to_insert = list(np.zeros(rand_values - len(action)))
+        action = np.asarray(vals_to_insert + list(action))
+    np.put(action, list(range(rand_values)),list(rand_action))
+    action = np.sort(action)
+    action = np.unique(action)
+    if birth_no_0:
+        action = np.delete(action,0)
+    return action

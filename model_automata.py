@@ -47,3 +47,60 @@ class QNetwork2(nn.Module):
         x = torch.squeeze(x)
         # print(x.shape)
         return x
+
+class Actor(nn.Module):
+    '''WARNING: the adaptiveMaxPool was added but its performance was not evaluated'''
+    def __init__(self, state_dim, action_dim, max_action):
+        super(Actor, self).__init__()
+        self.conv1 = nn.Conv3d(in_channels=1, out_channels=16, kernel_size=3)
+        self.bn1 = nn.BatchNorm3d(16)
+        self.conv2 = nn.Conv3d(in_channels=16, out_channels=action_dim, kernel_size=3)
+        self.bn2 = nn.BatchNorm3d(action_dim)
+        self.adaptiveMaxPool = nn.AdaptiveMaxPool3d(1)
+        self.max_action = max_action
+
+    def forward(self, x):
+        x = F.relu(self.bn1(self.conv1(x)))
+        x = F.relu(self.bn2(self.conv2(x)))
+        x = self.max_action * torch.tanh(self.adaptiveMaxPool(x))
+        x = torch.squeeze(x)
+        # print(x.shape)
+        return x
+
+class Critic(nn.Module):
+    '''WARNING: the adaptiveMaxPool was added but its performance was not evaluated'''
+    def __init__(self, state_dim, action_dim):
+        super(Critic, self).__init__()
+        self.conv1 = nn.Conv3d(in_channels=1, out_channels=16, kernel_size=3)
+        self.bn1 = nn.BatchNorm3d(16)
+        self.conv2 = nn.Conv3d(in_channels=16, out_channels=action_dim, kernel_size=3)
+        self.bn2 = nn.BatchNorm3d(action_dim)
+        self.adaptiveMaxPool = nn.AdaptiveMaxPool3d(1)
+        self.max_action = max_action
+        ###
+        self.conv1a = nn.Conv3d(in_channels=1, out_channels=16, kernel_size=3)
+        self.bn1a = nn.BatchNorm3d(16)
+        self.conv2a = nn.Conv3d(in_channels=16, out_channels=action_dim, kernel_size=3)
+        self.bn2a = nn.BatchNorm3d(action_dim)
+        self.adaptiveMaxPoola = nn.AdaptiveMaxPool3d(1)
+        
+    def forward(self, x):
+        xu = torch.cat([x,u], 1)
+        # Forward-Propagation on the first Critic Neural Network
+        x1 = F.relu(self.bn1(self.conv1(xu)))
+        x1 = F.relu(self.bn2(self.conv2(x1)))
+        x1 = torch.tanh(self.adaptiveMaxPool(x1))
+        x1 = torch.squeeze(x1)
+        # Forward-Propagation on the second Critic Neural Network
+        x2 = F.relu(self.bn1a(self.conv1a(xu)))
+        x2 = F.relu(self.bn2a(self.conv2a(x2)))
+        x2 = torch.tanh(self.adaptiveMaxPoola(x2))
+        x2 = torch.squeeze(x2)
+        return x1, x2
+    
+    def Q1(self, x, u):
+        xu = torch.cat([x, u], 1)
+        x1 = F.relu(self.layer_1(xu))
+        x1 = F.relu(self.layer_2(x1))
+        x1 = self.layer_3(x1)
+        return x1
