@@ -48,6 +48,33 @@ class QNetwork2(nn.Module):
         # print(x.shape)
         return x
 
+class NatureConvBody(nn.Module):
+    '''Adapted from https://github.com/ShangtongZhang/DeepRL/blob/717fe68e7ed00a80c6c52ec9613c9a16dbb37e0c/deep_rl/network/network_bodies.py#L10'''
+    def __init__(self, action_dim, in_channels=1, seed=0):
+        super(NatureConvBody, self).__init__()
+        self.seed = torch.manual_seed(seed)
+        self.feature_dim = action_dim
+        self.conv1 = layer_init(nn.Conv3d(in_channels, 32, kernel_size=3, stride=1))
+        self.conv2 = layer_init(nn.Conv3d(32, 64, kernel_size=3, stride=1))
+        self.conv3 = layer_init(nn.Conv3d(64, 64, kernel_size=3, stride=1))
+        self.fc4 = layer_init(nn.Linear(26*26*26 * 64, self.feature_dim))
+
+    def forward(self, x):
+        y = F.relu(self.conv1(x))
+        y = F.relu(self.conv2(y))
+        y = F.relu(self.conv3(y))
+        y = y.view(y.size(0), -1)
+        y = F.relu(self.fc4(y)) #OMM WARNING maybe change to tanh
+        y = torch.squeeze(y)
+        return y
+
+def layer_init(layer, w_scale=1.0):
+    '''https://github.com/ShangtongZhang/DeepRL/blob/717fe68e7ed00a80c6c52ec9613c9a16dbb37e0c/deep_rl/network/network_utils.py'''
+    nn.init.orthogonal_(layer.weight.data)
+    layer.weight.data.mul_(w_scale)
+    nn.init.constant_(layer.bias.data, 0)
+    return layer
+
 class Actor(nn.Module):
     '''WARNING: the adaptiveMaxPool was added but its performance was not evaluated'''
     def __init__(self, state_dim, action_dim, max_action):

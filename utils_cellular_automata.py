@@ -16,6 +16,7 @@ from numba import jit
 from scipy.stats import bernoulli
 from scipy import stats
 from scipy import signal 
+import seaborn as sns
 
 def plot_4_genetic_algorithm(auto_mask, auto_orig, auto_patched, figsize=(10,6)):
     fig, ax = plt.subplots(1,4,figsize=figsize)
@@ -852,3 +853,123 @@ def filter_nodule_generated3_3D(grid1, grid_cells_active_):
     z2 = z-z_min
     grid_filter_added[z,y,x] = grid_filter[z2,y2,x2]
     return grid_filter_added
+
+def figure_action(action_proba, n_actions, step, folder, save=True):
+    '''make figure that shows that values of the action vector for the cellular 
+    automata. One row for survive and one row for birth values'''
+    fig, ax = plt.subplots(2,1,figsize=(20,2.5))
+    larger_than_1_survive = 'k'
+    larger_than_1_birth = 'k'
+    if np.max(action_proba[:n_actions])>1: larger_than_1_survive = 'r'
+    if np.max(action_proba[n_actions:])>1: larger_than_1_birth = 'r'
+    g0 = sns.heatmap(np.expand_dims(action_proba[:n_actions],0), ax=ax[0], vmin=0, vmax=1, cmap='viridis', cbar=False, linewidths=.1, linecolor=larger_than_1_survive, yticklabels=['survive'])
+    g1 = sns.heatmap(np.expand_dims(action_proba[n_actions:],0), ax=ax[1], vmin=0, vmax=1, cmap='viridis', cbar=False, linewidths=.1, linecolor=larger_than_1_birth, yticklabels=['birth'])
+    g0.set_yticklabels(g0.get_yticklabels(), rotation = 0);
+    g1.set_yticklabels(g1.get_yticklabels(), rotation = 0);
+    ax[0].set_title(f'the outputs might not be in order_{step:05d}', fontsize=18);
+    fig.tight_layout()
+    if save:
+        fig.savefig(f'{folder}action_{step:05d}.png')
+        plt.close()
+
+def figure_make_gif(folder, new_name):
+    '''Make gif from images saved on a folder AND DELETE THE IMAGES.
+    Made to work with figure_action'''
+    images = []
+    filenames = os.listdir(folder)
+    filenames = np.sort(filenames)
+    for idx, filename in enumerate(filenames):
+        images.append(imageio.imread(f'{folder}{filename}'))
+        if idx==len(filenames)-1:
+            for i in range(10):
+                images.append(imageio.imread(f'{folder}{filename}'))
+        os.remove(f'{folder}{filename}')
+    imageio.mimsave(new_name, images)
+
+def figure_a_few_original_and_augmented_nodules(preds, skip, total_cols=5):
+    '''For each (5) column plot a nodule and on each subsequent row plot the
+    images generated for that nodule by the cellular automata'''
+    total_cols=total_cols
+    max_rows=1
+    # Get the indices where a new nodule is selected
+    pix_active = [np.sum(p>0) for p in preds]    
+    pix_active_diff = np.diff(pix_active)
+    ndl_new_idx = np.where(pix_active_diff < -500)[0]+1
+    ndl_new_idx = np.insert(ndl_new_idx,0,0)
+    idx_len_temps=[]
+    # Get the maximum number of rows we should include
+    for idx, i in enumerate(ndl_new_idx[skip:]):
+        if idx == total_cols: break
+        idx_this, idx_next = ndl_new_idx[skip:][idx], ndl_new_idx[skip:][idx+1]
+        idx_len_temp = idx_next - idx_this
+        if idx_len_temp > max_rows: 
+            max_rows = idx_len_temp
+        idx_len_temps.append(idx_len_temp)
+    # For each column plot a nodule and its augmented versions
+    fig, ax = plt.subplots(max_rows, total_cols,figsize=(12,12*(.2*max_rows)))
+    # each nodule in a separate column
+    for idx, i in enumerate(ndl_new_idx[skip:]):
+        if idx == total_cols: break
+        # Get start and end of each nodule
+        idx_this, idx_next = ndl_new_idx[skip:][idx], ndl_new_idx[skip:][idx+1]
+        # Increase steps in rows
+        for iidx in range(max_rows):
+            z,y,x = np.where(preds[idx_this+iidx][0]>0)
+            zz = int(np.median(z))
+            if iidx==0: 
+                orig = preds[idx_this+iidx][0]
+                text_corner=f'size={np.sum(preds[idx_this+iidx][0]>0):.0f}'
+            else: text_corner=f'{np.sum(np.abs(preds[idx_this+iidx][0] - orig)):.0f}'
+            if iidx < idx_len_temps[idx]:
+                ax[iidx,idx].imshow(preds[idx_this+iidx][0][zz], vmin=0, vmax=1)
+                ax[iidx,idx].text(1,3,text_corner,c='y', fontsize=14)
+            else:
+                ax[iidx,idx].imshow(np.zeros_like(preds[0][0][zz]))
+    for axx in ax.ravel(): axx.axis('off')
+    fig.tight_layout()
+
+def figure_a_few_original_and_augmented_nodules_rows(preds, skip, total_cols=5):
+    '''For each (5) column plot a nodule and on each subsequent row plot the
+    images generated for that nodule by the cellular automata'''
+    total_cols=total_cols
+    max_rows=1
+    # Get the indices where a new nodule is selected
+    pix_active = [np.sum(p>0) for p in preds]    
+    pix_active_diff = np.diff(pix_active)
+    ndl_new_idx = np.where(pix_active_diff < -500)[0]+1
+    ndl_new_idx = np.insert(ndl_new_idx,0,0)
+    idx_len_temps=[]
+    # Get the maximum number of rows we should include
+    for idx, i in enumerate(ndl_new_idx[skip:]):
+        if idx == total_cols: break
+        idx_this, idx_next = ndl_new_idx[skip:][idx], ndl_new_idx[skip:][idx+1]
+        idx_len_temp = idx_next - idx_this
+        if idx_len_temp > max_rows: 
+            max_rows = idx_len_temp
+        idx_len_temps.append(idx_len_temp)
+    # For each column plot a nodule and its augmented versions
+    skip_text=skip
+    fig, ax = plt.subplots(total_cols, max_rows,figsize=(12*(.2*max_rows),12))
+    # each nodule in a separate column
+    for idx, i in enumerate(ndl_new_idx[skip:]):
+        skip_text+=1
+        if idx == total_cols: break
+        # Get start and end of each nodule
+        idx_this, idx_next = ndl_new_idx[skip:][idx], ndl_new_idx[skip:][idx+1]
+        # Increase steps in rows
+        for iidx in range(max_rows):
+            z,y,x = np.where(preds[idx_this+iidx][0]>0)
+            zz = int(np.median(z))
+            if iidx==0: 
+                orig = preds[idx_this+iidx][0]
+                text_corner=f'size={np.sum(preds[idx_this+iidx][0]>0):.0f}'
+            else: text_corner=f'{np.sum(np.abs(preds[idx_this+iidx][0] - orig)):.0f}'
+            if iidx < idx_len_temps[idx]:
+                ax[idx, iidx].imshow(preds[idx_this+iidx][0][zz], vmin=0, vmax=1)
+                ax[idx, iidx].text(1,3,text_corner,c='y', fontsize=14)
+            else:
+                ax[idx, iidx].imshow(np.zeros_like(preds[0][0][zz]))
+                if iidx==max_rows-1:
+                    ax[idx, iidx].text(10,15, f'it={skip_text}',c='y', fontsize=22)
+    for axx in ax.ravel(): axx.axis('off')
+    fig.tight_layout()

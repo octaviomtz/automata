@@ -2,7 +2,7 @@ import numpy as np
 import random
 from collections import namedtuple, deque
 
-from model_automata import QNetwork2
+from model_automata import NatureConvBody
 
 import torch
 import torch.nn.functional as F
@@ -15,8 +15,8 @@ TAU = 1e-3              # for soft update of target parameters
 LR = 5e-4               # learning rate 
 UPDATE_EVERY = 4        # how often to update the network
 
-# device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-device = torch.device("cpu")
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cpu")
 
 class Agent():
     """Interacts with and learns from the environment."""
@@ -35,8 +35,8 @@ class Agent():
         self.seed = random.seed(seed)
 
         # Q-Network
-        self.qnetwork_local = QNetwork2(action_size, 1, seed).to(device)
-        self.qnetwork_target = QNetwork2(action_size, 1, seed).to(device)
+        self.qnetwork_local = NatureConvBody(action_size, 1, seed).to(device)
+        self.qnetwork_target = NatureConvBody(action_size, 1, seed).to(device)
         self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=LR)
 
         # Replay memory
