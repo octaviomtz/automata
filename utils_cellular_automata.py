@@ -17,6 +17,9 @@ from scipy.stats import bernoulli
 from scipy import stats
 from scipy import signal 
 import seaborn as sns
+from torch.utils.data import Dataset, DataLoader
+from LSUV3D import LSUVinit3D
+import torch
 
 def plot_4_genetic_algorithm(auto_mask, auto_orig, auto_patched, figsize=(10,6)):
     fig, ax = plt.subplots(1,4,figsize=figsize)
@@ -779,16 +782,15 @@ def add_seed_3D(last, zz = 31, yy = 31, xx = 31, speckles_radious = 2, speckles_
         
     return mini_patched, grid_cells_active
 @jit
-def survive_and_birth_individual_list_3D_mask(neighbors, means, mask, values, survives, births, cells_active, grid_new):
+def survive_and_birth_individual_list_3D_mask(neighbors, means, mask, values, action, cells_active, grid_new, n_actions=27):
     neighbors = np.asarray(neighbors)
     means = np.asarray(means)
     values = np.asarray(values)
-    survives = np.asarray(survives)
-    births = np.asarray(births)
     LIMIT_UP = 0.75
     LIMIT_DOWN = 0.15
     grid_new = np.asarray(grid_new)
-    
+    survives = np.asarray(action[:n_actions])
+    births = np.asarray(action[n_actions:])
     z,y,x = np.where(mask==1)
     
     # grid_new = copy(values)
@@ -973,3 +975,102 @@ def figure_a_few_original_and_augmented_nodules_rows(preds, skip, total_cols=5):
                     ax[idx, iidx].text(10,15, f'it={skip_text}',c='y', fontsize=22)
     for axx in ax.ravel(): axx.axis('off')
     fig.tight_layout()
+
+class dataset_nodules(Dataset):
+    '''Dataset used to initialize the DQN networks using LSUV.'''
+    def __init__(self, nodules_smaller, transform = False):
+        self.A = nodules_smaller
+        self.transform = transform
+        
+    def __len__(self):
+        return len(self.A)
+    
+    def rotate_3D(self, img):
+        #Rotations
+        rot_rand = np.random.randint(0,4)
+        img = np.rot90(img, rot_rand, (0,1)).copy()
+        rot_rand2 = np.random.randint(0,4)
+        img = np.rot90(img, rot_rand2, (0,2)).copy()
+        rot_rand3 = np.random.randint(0,4)
+        img = np.rot90(img, rot_rand3, (1,2)).copy()
+        #Flips
+        if np.random.rand() > .5:
+            img = np.flip(img, 1).copy()
+        if np.random.rand() > .5:
+            img = np.flip(img, 2).copy()
+        if np.random.rand() > .5:
+            img = np.flip(img, (1,2)).copy()
+        return img
+                              
+    def __getitem__(self, idx):
+        imgA = self.A[idx]
+        
+        # Flips
+        if self.transform:
+            imgA = self.rotate_3D(imgA)
+                    
+        # Add channels dimension
+        imgA = np.expand_dims(imgA,0)
+          
+        # Pytorch
+        imgA = torch.Tensor(imgA)
+        
+        return imgA
+
+def apply_LSUV(agent, init_data, model_LSUV='NatureConvBody', path='utils/init_models_LSUV/'):
+    '''Check if there is an already existing initialized model. Otherwise apply LSUV'''
+    preinit_models = os.listdir(path)
+    preinit_models = [i.split('_local.pt')[0] for i in preinit_models]
+    if model_LSUV in preinit_models:
+        print('loading models already preinit with LSUV')
+        agent.qnetwork_local.load_state_dict(torch.load(f'{path}{model_LSUV}_local.pt'))
+        agent.qnetwork_target.load_state_dict(torch.load(f'{path}{model_LSUV}_target.pt'))
+    else:
+        agent.qnetwork_local.eval()
+        agent.qnetwork_target.eval()
+        with torch.no_grad():
+            agent.qnetwork_local = LSUVinit3D(agent.qnetwork_local, init_data)
+            agent.qnetwork_target = LSUVinit3D(agent.qnetwork_target, init_data)
+        agent.qnetwork_local.train()    
+        agent.qnetwork_target.train()
+        torch.save(agent.qnetwork_local.state_dict(), f'{path}{model_LSUV}_local.pt')
+        torch.save(agent.qnetwork_target.state_dict(), f'{path}{model_LSUV}_target.pt')
+    return agent.qnetwork_local, agent.qnetwork_target
+
+def action_plus_random(action, min_rand_action_val=0, max_rand_action_val=10, rand_values = 4, birth_no_0=False):
+    ''' Convert to integers and add randomness
+    WARNING1: This function considers that the values given in action are in order. They come from the last 
+    layer of the NN and might not be in order. 
+    1.Get survive/birth from the full action array. 
+    2.Add randomness. WARNING (check if this is correct) 
+    Note1. Prevent nodules growing from nothing: Birth min_rand_action_val should be 1 and birth_no_0 = True
+    WARNING2. Removing of birth=0 activation might not be happening because of WARNING1'''
+    action = np.where(np.asarray(action)==1)[0]
+    # Randomness
+    rand_action = np.random.randint(min_rand_action_val, max_rand_action_val, rand_values)
+    action = np.random.permutation(action)
+    # If the rand_values are more than the values in action, then insert zeros that will be replaced by rand_values
+    if rand_values > len(action):
+        vals_to_insert = list(np.zeros(rand_values - len(action)))
+        action = np.asarray(vals_to_insert + list(action))
+    np.put(action, list(range(rand_values)),list(rand_action))
+    action = np.sort(action)
+    action = np.unique(action)
+    if birth_no_0:
+        action = np.delete(action,0)
+    return action
+
+def env_step(state_in, grid_active_in, nodule_target, action, THRESHOLD):
+    '''env step according to action policy.
+    1. Count the neighbours of each cell and their means.
+    2. Apply cellular automata rules using the survive_and_birth_individual_list_3D_mask
+    3. Get the rewards'''
+    grid_new = copy(state_in)
+    # print(np.shape(state_in), np.shape(grid_active_in), THRESHOLD)
+    grid_neigh, grid_means = count_neighbors_and_get_means_3D_mask(state_in, grid_active_in, threshold = THRESHOLD) #OMM it used to be .05
+    next_state = survive_and_birth_individual_list_3D_mask(grid_neigh, grid_means, grid_active_in, state_in, action, grid_active_in, grid_new)
+    reward_not_normalized = -np.sum(np.abs(nodule_target - next_state)) # THIS SHOULD HAVE A NEGATIVE SIGN
+    reward = reward_not_normalized/(np.sum(nodule_target>0)) #normalize by the mask of the target
+    next_state = np.expand_dims(next_state,0); 
+    next_state = np.expand_dims(next_state,0)
+    return next_state, reward, reward_not_normalized, grid_neigh

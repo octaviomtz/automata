@@ -7,7 +7,7 @@ from scipy.ndimage import binary_dilation
 
 from tqdm import tqdm
 from utils_cellular_automata import *
-from dqn_agent_automata import Agent, ReplayBuffer, action_plus_random
+from dqn_agent_automata import Agent, ReplayBuffer
 import imageio
 import os
 

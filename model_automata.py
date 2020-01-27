@@ -68,6 +68,26 @@ class NatureConvBody(nn.Module):
         y = torch.squeeze(y)
         return y
 
+class NatureConvBodySigmoid(nn.Module):
+    '''Adapted from https://github.com/ShangtongZhang/DeepRL/blob/717fe68e7ed00a80c6c52ec9613c9a16dbb37e0c/deep_rl/network/network_bodies.py#L10'''
+    def __init__(self, action_dim, in_channels=1, seed=0):
+        super(NatureConvBodySigmoid, self).__init__()
+        self.seed = torch.manual_seed(seed)
+        self.feature_dim = action_dim
+        self.conv1 = layer_init(nn.Conv3d(in_channels, 32, kernel_size=3, stride=1))
+        self.conv2 = layer_init(nn.Conv3d(32, 64, kernel_size=3, stride=1))
+        self.conv3 = layer_init(nn.Conv3d(64, 64, kernel_size=3, stride=1))
+        self.fc4 = layer_init(nn.Linear(26*26*26 * 64, self.feature_dim))
+
+    def forward(self, x):
+        y = F.relu(self.conv1(x))
+        y = F.relu(self.conv2(y))
+        y = F.relu(self.conv3(y))
+        y = y.view(y.size(0), -1)
+        y = torch.sigmoid(self.fc4(y)) # changed relu -> sigmoid
+        y = torch.squeeze(y)
+        return y
+
 def layer_init(layer, w_scale=1.0):
     '''https://github.com/ShangtongZhang/DeepRL/blob/717fe68e7ed00a80c6c52ec9613c9a16dbb37e0c/deep_rl/network/network_utils.py'''
     nn.init.orthogonal_(layer.weight.data)

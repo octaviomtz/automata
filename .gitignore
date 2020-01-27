@@ -9,3 +9,4 @@ dqn_agent.py
 *.pth
 figures/*
 model.py
+utils/*

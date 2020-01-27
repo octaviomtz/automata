@@ -2,11 +2,13 @@ import numpy as np
 import random
 from collections import namedtuple, deque
 
-from model_automata import NatureConvBody
+from model_automata import NatureConvBodySigmoid
 
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
+import os
+from LSUV3D import LSUVinit3D
 
 BUFFER_SIZE = int(1e5)  # replay buffer size
 BATCH_SIZE = 8         # minibatch size
@@ -21,7 +23,7 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 class Agent():
     """Interacts with and learns from the environment."""
 
-    def __init__(self, state_size, action_size, seed):
+    def __init__(self, state_size, action_size, seed, init_data):
         """Initialize an Agent object.
         
         Params
@@ -33,10 +35,33 @@ class Agent():
         self.state_size = state_size
         self.action_size = action_size
         self.seed = random.seed(seed)
+        self.path = 'utils/init_models_LSUV/'
+        self.model_LSUV = 'NatureConvBodySigmoid'
+        self.init_data = init_data
 
         # Q-Network
-        self.qnetwork_local = NatureConvBody(action_size, 1, seed).to(device)
-        self.qnetwork_target = NatureConvBody(action_size, 1, seed).to(device)
+        self.qnetwork_local = NatureConvBodySigmoid(action_size, 1, seed).to(device)
+        self.qnetwork_target = NatureConvBodySigmoid(action_size, 1, seed).to(device)
+        ## added OMM/
+        preinit_models = os.listdir(self.path)
+        preinit_models = [i.split('_local.pt')[0] for i in preinit_models]
+        if self.model_LSUV in preinit_models:
+            print('loading models already preinit with LSUV')
+            self.qnetwork_local.load_state_dict(torch.load(f'{self.path}{self.model_LSUV}_local.pt'))
+            self.qnetwork_target.load_state_dict(torch.load(f'{self.path}{self.model_LSUV}_target.pt'))
+        else:
+            self.qnetwork_local.eval()
+            self.qnetwork_target.eval()
+            with torch.no_grad():
+                self.qnetwork_local = LSUVinit3D(self.qnetwork_local, self.init_data)
+                self.qnetwork_target = LSUVinit3D(self.qnetwork_target, self.init_data)
+            self.qnetwork_local.train()    
+            self.qnetwork_target.train()
+            torch.save(self.qnetwork_local.state_dict(), f'{self.path}{self.model_LSUV}_local.pt')
+            torch.save(self.qnetwork_target.state_dict(), f'{self.path}{self.model_LSUV}_target.pt')
+        self.qnetwork_local.to(device)
+        self.qnetwork_target.to(device)
+        ## /added OMM
         self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=LR)
 
         # Replay memory
@@ -47,14 +72,15 @@ class Agent():
     def step(self, state, action, reward, next_state, done):
         # Save experience in replay memory
         self.memory.add(state, action, reward, next_state, done)
-        
+        Q_expected, Q_targets = '_', '_'
         # Learn every UPDATE_EVERY time steps.
         self.t_step = (self.t_step + 1) % UPDATE_EVERY
         if self.t_step == 0:
             # If enough samples are available in memory, get random subset and learn
             if len(self.memory) > BATCH_SIZE:
                 experiences = self.memory.sample()
-                self.learn(experiences, GAMMA)
+                Q_expected, Q_targets = self.learn(experiences, GAMMA)
+        return Q_expected, Q_targets
 
     def act(self, state, eps=0.):
         """Returns actions for given state as per current policy.
@@ -70,7 +96,7 @@ class Agent():
             action_values = self.qnetwork_local(state)
         self.qnetwork_local.train()
 
-        return action_values.cpu().data.numpy()
+        return action_values
         # Epsilon-greedy action selection
         # if random.random() > eps:
         #     return np.argmax(action_values.cpu().data.numpy())
@@ -91,10 +117,13 @@ class Agent():
         # Get max predicted Q values (for next states) from target model
         Q_targets_TEMP = self.qnetwork_target(next_states).detach()
         # print(Q_targets_TEMP.shape)
-        # Instead of taking the max we take the average value
+        # Instead of taking the max we take the average value of the absolute values
         # Q_targets_next = self.qnetwork_target(next_states).detach().max(1)[0].unsqueeze(1)
+        # THESE THREE LINES ONLY PRODUCE A VALUE FOR EACH next_state. 
+        # THEY SHOULD BE APPLIED TO Q_expected. THEN MAX() OVER VARIOUS Q_targets OBTAINED
+        # FROM SLIGHT VARIATIONS IN THE next_state
         Q_targets_next = self.qnetwork_target(next_states).detach()#.cpu().numpy()
-        Q_targets_next = Q_targets_next.sum(1)/Q_targets_next.shape[1]
+        Q_targets_next = torch.abs(Q_targets_next).sum(1)/Q_targets_next.shape[1]
         Q_targets_next = torch.unsqueeze(Q_targets_next,-1)
         # Compute Q targets for current states 
         Q_targets = rewards + (gamma * Q_targets_next * (1 - dones))
@@ -103,14 +132,18 @@ class Agent():
         Q_expected = self.qnetwork_local(states).gather(1, actions)
 
         # Compute loss
+        # print(f'Q_expected = {Q_expected}')
+        # print(f'Q_targets = {Q_targets}')
+        
         loss = F.mse_loss(Q_expected, Q_targets)
-        # Minimize the loss
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
+        # Minimize the loss #OMM WARNING we are not doing backprop
+        # self.optimizer.zero_grad()
+        # loss.backward()
+        # self.optimizer.step()
 
         # ------------------- update target network ------------------- #
-        self.soft_update(self.qnetwork_local, self.qnetwork_target, TAU)                     
+        self.soft_update(self.qnetwork_local, self.qnetwork_target, TAU)    
+        return Q_expected, Q_targets               
 
     def soft_update(self, local_model, target_model, tau):
         """Soft update model parameters.
@@ -166,25 +199,12 @@ class ReplayBuffer:
         """Return the current size of internal memory."""
         return len(self.memory)
 
-def action_plus_random(action, min_rand_action_val=0, max_rand_action_val=10, rand_values = 4, birth_no_0=False):
-    ''' Convert to integers and add randomness
-    WARNING1: This function considers that the values given in action are in order. They come from the last 
-    layer of the NN and might not be in order. 
-    1.Get survive/birth from the full action array. 
-    2.Add randomness. WARNING (check if this is correct) 
-    Note1. Prevent nodules growing from nothing: Birth min_rand_action_val should be 1 and birth_no_0 = True
-    WARNING2. Removing of birth=0 activation might not be happening because of WARNING1'''
-    action = np.where(np.asarray(action)==1)[0]
-    # Randomness
-    rand_action = np.random.randint(min_rand_action_val, max_rand_action_val, rand_values)
-    action = np.random.permutation(action)
-    # If the rand_values are more than the values in action, then insert zeros that will be replaced by rand_values
-    if rand_values > len(action):
-        vals_to_insert = list(np.zeros(rand_values - len(action)))
-        action = np.asarray(vals_to_insert + list(action))
-    np.put(action, list(range(rand_values)),list(rand_action))
-    action = np.sort(action)
-    action = np.unique(action)
-    if birth_no_0:
-        action = np.delete(action,0)
-    return action
+def action_proba_logits_plus_random(action_proba, random_range=2):
+    '''Give some randomness to the action_probas.
+    1. First convert them to logits, then add some value between some range (random_range).
+    Finally convert back to probas'''
+    logits = torch.log(action_proba/(1-action_proba))
+    random_values = (torch.rand(logits.shape) * random_range - (random_range/2)).to(device)
+    logits_plus_random = logits + random_values
+    action_proba_random = torch.sigmoid(logits_plus_random)
+    return action_proba_random
