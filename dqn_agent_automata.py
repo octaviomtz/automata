@@ -115,31 +115,26 @@ class Agent():
         # print('learning')
         #print(np.shape(states), np.shape(actions), np.shape(rewards), np.shape(next_states))
         # Get max predicted Q values (for next states) from target model
-        Q_targets_TEMP = self.qnetwork_target(next_states).detach()
-        # print(Q_targets_TEMP.shape)
-        # Instead of taking the max we take the average value of the absolute values
-        # Q_targets_next = self.qnetwork_target(next_states).detach().max(1)[0].unsqueeze(1)
-        # THESE THREE LINES ONLY PRODUCE A VALUE FOR EACH next_state. 
-        # THEY SHOULD BE APPLIED TO Q_expected. THEN MAX() OVER VARIOUS Q_targets OBTAINED
-        # FROM SLIGHT VARIATIONS IN THE next_state
-        Q_targets_next = self.qnetwork_target(next_states).detach()#.cpu().numpy()
-        Q_targets_next = torch.abs(Q_targets_next).sum(1)/Q_targets_next.shape[1]
-        Q_targets_next = torch.unsqueeze(Q_targets_next,-1)
+        # Q_targets_next = self.qnetwork_target(next_states).detach().max(1)[0].unsqueeze(1) # ORIGINAL EQ
+        Q_targets_TEMP = self.qnetwork_target(next_states).detach()#.cpu().numpy()
+        print(f'Q_targets_TEMP shape = {Q_targets_TEMP.shape}')
+        Q_targets_next = torch.unsqueeze(torch.mean(1-torch.abs(torch.round(Q_targets_TEMP) - Q_targets_TEMP), 1),-1)
+        print(f'Q_targets_next shape = {Q_targets_next.shape}')
         # Compute Q targets for current states 
         Q_targets = rewards + (gamma * Q_targets_next * (1 - dones))
-        ###print(f'Q_targets = {Q_targets[0].squeeze()}')
         # Get expected Q values from local model
-        Q_expected = self.qnetwork_local(states).gather(1, actions)
+        # Q_expected = self.qnetwork_local(states).gather(1, actions) # ORIGINAL EQ
+        Q_expected_TEMP = self.qnetwork_local(states)
+        print(f'Q_expected_TEMP shape = {Q_expected_TEMP.shape}')
+        _, Q_expected = pseudo_certainties(Q_expected_TEMP)
 
         # Compute loss
-        # print(f'Q_expected = {Q_expected}')
-        # print(f'Q_targets = {Q_targets}')
-        
+        print(f'Q_expected = {Q_expected.shape}\nQ_targets = {Q_targets.shape}')
         loss = F.mse_loss(Q_expected, Q_targets)
         # Minimize the loss #OMM WARNING we are not doing backprop
-        # self.optimizer.zero_grad()
-        # loss.backward()
-        # self.optimizer.step()
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
 
         # ------------------- update target network ------------------- #
         self.soft_update(self.qnetwork_local, self.qnetwork_target, TAU)    
@@ -188,7 +183,7 @@ class ReplayBuffer:
         experiences = random.sample(self.memory, k=self.batch_size)
 
         states = torch.from_numpy(np.vstack([e.state for e in experiences if e is not None])).float().to(device)
-        actions = torch.from_numpy(np.vstack([e.action for e in experiences if e is not None])).long().to(device)
+        actions = torch.from_numpy(np.vstack([e.action for e in experiences if e is not None])).float().to(device) #OMM long -> float to accept probas
         rewards = torch.from_numpy(np.vstack([e.reward for e in experiences if e is not None])).float().to(device)
         next_states = torch.from_numpy(np.vstack([e.next_state for e in experiences if e is not None])).float().to(device)
         dones = torch.from_numpy(np.vstack([e.done for e in experiences if e is not None]).astype(np.uint8)).float().to(device)
@@ -208,3 +203,37 @@ def action_proba_logits_plus_random(action_proba, random_range=2):
     logits_plus_random = logits + random_values
     action_proba_random = torch.sigmoid(logits_plus_random)
     return action_proba_random
+
+def pseudo_certainty(probas):
+    '''get the action with the most certainty (values closer to 0 ot 1 <for sigmoid>)'''
+    return torch.mean(1-torch.abs(torch.round(probas) - probas))
+
+def pseudo_certainties(action_probas, return_numpy=False, proba_range=1):
+    '''For each probability get the certainty (values closer to 0 ot 1 <for sigmoid>) and 
+    return them in a tensor together with the tensor that obtained the largest certainty'''
+    certainty_mean_largest = 0
+    certainties =  torch.Tensor().to(device)
+    for idx, i in enumerate(action_probas):
+        certainty_mean = pseudo_certainty(i)
+        certainties = torch.cat((certainties, torch.unsqueeze(certainty_mean,0)),0)
+        # print(certainty_mean)
+        if certainty_mean > certainty_mean_largest:
+            certainty_mean_largest = certainty_mean
+            certainty_largest = i
+    if return_numpy:
+        certainty_largest_ = certainty_largest.detach().numpy().cpu()
+    else: 
+        certainty_largest_ = certainty_largest
+    certainties = torch.unsqueeze(certainties,-1)
+    return certainty_largest_, certainties
+
+def pseudo_certainty_largest(action_probas, proba_range=1):
+    '''get the action with the most certainty (values closer to 0 ot 1 <for sigmoid>)'''
+    certainty_mean_largest = 0
+    for i in action_probas:
+        certainty_mean = pseudo_certainty(i)
+        # print(certainty_mean)
+        if certainty_mean > certainty_mean_largest:
+            certainty_mean_largest = certainty_mean
+            certainty_largest = i
+    return certainty_largest

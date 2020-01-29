@@ -7,7 +7,7 @@ from scipy.ndimage import binary_dilation
 
 from tqdm import tqdm_notebook
 from utils_cellular_automata import *
-from dqn_agent_automata import Agent, ReplayBuffer, action_proba_logits_plus_random
+from dqn_agent_automata import *
 import imageio
 import os
 import torch.nn.functional as F
@@ -36,7 +36,7 @@ init_data = next(dataiter)
 init_data.shape
 
 # Train across episodes
-n_episodes = 2 # 11
+n_episodes = 60 # 11
 timesteps = 60
 THRESHOLD = .5
 n_actions = 27
@@ -56,6 +56,7 @@ for i_episode in tqdm_notebook(range(n_episodes),total = n_episodes):
     done = 0
 
     for j in tqdm_notebook(range(timesteps), total=timesteps, leave=False):
+
         # nodule_target is used in env.step
         nodule_idx += 1
         nodule_target = nodules_smaller[nodule_idx]
@@ -63,18 +64,16 @@ for i_episode in tqdm_notebook(range(n_episodes),total = n_episodes):
         # agent.act
         action_proba = agent.act(state)
         action_proba_random_many = [action_proba_logits_plus_random(action_proba) for i in range(3)]
-        action_proba_random = action_proba_random_many[0]
-        action = np.round(action_proba_random.detach().cpu().numpy(),0)
+        action_proba_random_many.append(action_proba)
+        action_proba_selected = pseudo_certainty_largest(action_proba_random_many).detach().cpu().numpy()
+        action = np.round(action_proba_selected,0)
         
         # env.step
         next_state, reward, reward_not_normalized, grid_neigh = env_step(state[0], grid_active, nodule_target, action, THRESHOLD)
     
         # agent.step
         state = np.expand_dims(state,0)
-        Q_expected, Q_targets = agent.step(state, action, reward, next_state, done) # maybe put action_proba instead of action
-    
-        print(f'({iteration:02d})Q_targets={Q_targets}')
-#         print(f'Q_expected={Q_expected}')
+        Q_expected, Q_targets = agent.step(state, action_proba_selected, reward, next_state, done) # maybe put action_proba instead of action
     
         state = next_state[0]
         score += reward
@@ -88,7 +87,7 @@ for i_episode in tqdm_notebook(range(n_episodes),total = n_episodes):
         #
         action_probas.append(action_proba)
         action_proba_random_manys.append(action_proba_random_many)
-        action_proba_randoms.append(action_proba_random)
+        action_proba_randoms.append(action_proba_selected)
         
         if i_episode%10 == 0:
             torch.save(agent.qnetwork_local.state_dict(), 'DQN_CA_v0.pth')
